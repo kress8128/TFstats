@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.MalformedURLException;
+import java.net.SocketException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Scanner;
@@ -25,6 +26,9 @@ public class TFstats1 {
 	/** 総ミノ数 */
 	private int vMino;
 
+	/** URL読み込みのリトライ許容数 */
+	private static final int RETRY_NUM = 100;
+
 	/**
 	 * コンストラクタ
 	 */
@@ -32,6 +36,23 @@ public class TFstats1 {
 		vTime = 0;
 		vLine = 0;
 		vMino = 0;
+	}
+
+	/**
+	 * userIDを手動入力する
+	 * HardDropのサイトが動いていないときはこれを使う
+	 * @param scan Scanner
+	 * @return userID
+	 */
+	public int setID(Scanner scan) {
+		while(true) {
+			try {
+				System.out.println("Input userID");
+				int id = scan.nextInt();
+				return id;
+			} catch (Exception e) {
+			}
+		}
 	}
 
 	/**
@@ -54,16 +75,21 @@ public class TFstats1 {
 	 * 練習モードをプレイしたかどうかを判断する
 	 * ノックアウトされて、まだ試合が続いている間に練習モードをプレイするとその試合の戦績がリセットされるため
 	 * @param line 試合で記録されたラインセント数
+	 * @param scan Scanner
 	 * @return 練習モードをプレイしていないかどうか
 	 */
-	public static boolean checknotPractice(int line) {
+	public static boolean checknotPractice(int line, Scanner scan) {
 		if(line != 0) {
 			return true;
 		}else {
-			Scanner scan = null;
-			System.out.println("practice?");
-			scan = new Scanner(System.in);
-			boolean bool = !scan.nextBoolean();
+			boolean bool = true;
+			while(true) {
+				System.out.println("practice?(true/false)");
+				try {
+					bool = !scan.nextBoolean();
+					break;
+				} catch(Exception e) {}
+			}
 			return bool;
 		}
 	}
@@ -71,13 +97,18 @@ public class TFstats1 {
 	/**
 	 * 時間を入力してもらう
 	 * 30秒未満にノックアウトor試合終了した場合記録されないため
+	 * @param scan Scanner
 	 * @return 試合時間
 	 */
-	public static int timeInput() {
-		Scanner scan = null;
-		System.out.println("Input time");
-		scan = new Scanner(System.in);
-		int time = scan.nextInt();
+	public static int timeInput(Scanner scan) {
+		int time = 0;
+		while(true) {
+			System.out.println("Input time");
+			try {
+				time = scan.nextInt();
+				break;
+			} catch(Exception e) {}
+		}
 		return time;
 	}
 
@@ -88,7 +119,14 @@ public class TFstats1 {
 	 * @throws IOException
 	 */
 	public ArrayList<String> getSourceText(URL url) throws IOException {
-		InputStream in = url.openStream();
+		InputStream in = null;
+		for(int i = 0;i < RETRY_NUM;++i) {
+			try {
+				in = url.openStream();
+				break;
+			} catch(SocketException e) {
+			}
+		}
 		ArrayList<String> strarray = new ArrayList<String>();
 		try {
 			BufferedReader bf = new BufferedReader(new InputStreamReader(in));
@@ -150,9 +188,11 @@ public class TFstats1 {
 		assert min * 60 + sec == time;
 		double apm = (double)line * 60 / time;
 		double tpm = (double)mino * 60 / time;
+		double apt = (double)line / mino;
 		String APM = String.format("%.2f", apm);
 		String TPM = String.format("%.2f", tpm);
-		System.out.println("time:" + min + ":" + SEC + " APM:" + APM + " TPM:" + TPM);
+		String APT = String.format("%.3f", apt);
+		System.out.println("time:" + min + ":" + SEC + " APM:" + APM + " TPM:" + TPM + " APT:" + APT);
 	}
 
 	/**
@@ -169,20 +209,32 @@ public class TFstats1 {
 
 	public static void main(String[] args) throws MalformedURLException, IOException {
 		TFstats1 stats = new TFstats1();
-		String username = "pokerou";
-		int userID = 0;
+		Scanner scan = null;
+		scan = new Scanner(System.in);
+		String username;
+		int userID;
 		int place = 0;
-		boolean HD_exist = true;
 		String[] data;
-		if(HD_exist) {
-			String[] str = stats.readID(username);
-			userID = Integer.parseInt(str[6]);
+		while(true) {
+			System.out.println("Input username");
+			username = scan.next();
+			try{
+				String[] str = stats.readID(username);
+				userID = Integer.parseInt(str[6]);
+				if(userID == 0) {
+					System.out.println("This username is invalid");
+				} else {
+					break;
+				}
+			}catch(Exception e) {
+				System.out.println("Sorry, cannot read userID");
+				userID = stats.setID(scan);
+			}
 		}
 		data = stats.readStats(username, userID);
 		while(stats.checkPlaceofStats(data, place)) {
 			place += 9;
 		}
-		int i = 0;
 		int games, mino, line;
 		games = Integer.parseInt(data[35 + place]);
 		mino = Integer.parseInt(data[67 + place]);
@@ -192,48 +244,43 @@ public class TFstats1 {
 		timestr = p.split(data[43 + place]);
 		int time = Integer.parseInt(timestr[1]) * 60 + Integer.parseInt(timestr[2]);
 		double start = System.currentTimeMillis();
-		double millitime = start;
 		boolean gameend;
 		boolean notPractice;
+		System.out.println("Start");
 
-		while(i < 300) {
+		while(System.currentTimeMillis() - start < 300000) {
 			notPractice = true;
-			if(System.currentTimeMillis() - millitime > 1000) {
-				gameend = false;
-				millitime = System.currentTimeMillis();
-				data = stats.readStats(username, userID);
-				gameend = games != Integer.parseInt(data[35 + place]);
-				if(gameend) {
-					start = System.currentTimeMillis();
-					int thismino, thisline;
-					thisline = Integer.parseInt(data[59 + place]) - line;
-					line += thisline;
-					notPractice = checknotPractice(thisline);
-					thismino = Integer.parseInt(data[67 + place]) - mino;
-					mino += thismino;
-					timestr = p.split(data[43 + place]);
-					int timetemp = Integer.parseInt(timestr[1]) * 60 + Integer.parseInt(timestr[2]);
-					int thistime;
-					if(timetemp < time) {
-						thistime = timetemp + 3600 - time;
-					} else if(timetemp == time && notPractice) {
-						thistime = timeInput();
-					} else {
-						thistime = timetemp - time;
-					}
-					if(notPractice) {
-						stats.printStats(thistime, thisline, thismino);
-						stats.add(thistime, thisline, thismino);
-					}
-					time = timetemp;
-					games++;
-					i = 0;
+			gameend = false;
+			data = stats.readStats(username, userID);
+			gameend = games != Integer.parseInt(data[35 + place]);
+			if(gameend) {
+				start = System.currentTimeMillis();
+				int thismino, thisline;
+				thisline = Integer.parseInt(data[59 + place]) - line;
+				line += thisline;
+				notPractice = checknotPractice(thisline, scan);
+				thismino = Integer.parseInt(data[67 + place]) - mino;
+				mino += thismino;
+				timestr = p.split(data[43 + place]);
+				int timetemp = Integer.parseInt(timestr[1]) * 60 + Integer.parseInt(timestr[2]);
+				int thistime;
+				if(timetemp < time) {
+					thistime = timetemp + 3600 - time;
+				} else if(timetemp == time && notPractice) {
+					thistime = timeInput(scan);
 				} else {
-					i++;
+					thistime = timetemp - time;
 				}
+				if(notPractice) {
+					stats.printStats(thistime, thisline, thismino);
+					stats.add(thistime, thisline, thismino);
+				}
+				time = timetemp;
+				games++;
 			}
 		}
 		System.out.println("END");
 		stats.printStats(stats.vTime, stats.vLine, stats.vMino);
+		scan.close();
 	}
 }
